@@ -1,0 +1,40 @@
+body {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background: #222;
+    margin: 0;
+    font-family: Arial, sans-serif;
+    color: white;
+    font-weight: bold;
+}
+
+table {
+    border-collapse: collapse;
+}
+
+td {
+    width: 25px;
+    height: 25px;
+    border: 1px solid #333;
+    background: #111;
+}
+
+.snake {
+    background: limegreen;
+}
+
+.head {
+    background: green;
+}
+
+.food {
+    background: red;
+}
+
+#score,
+#speed {
+    font-weight: bold;
+}
