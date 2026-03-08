@@ -4,6 +4,7 @@ import json
 import torch
 import random
 import numpy as np
+import os
 from collections import deque
 from helper import plot
 from model import Linear_QNet, QTrainer
@@ -12,7 +13,30 @@ MAX_MEMORY = 100_000
 BATCH_SIZE = 1000
 LR = 0.001
 
+MODEL_WEIGHTS_FILE = 'model.pth'
+CHECKPOINT_FILE = 'checkpoint.pth'
+
 class Agent:
+
+    def _load_progress_if_available(self):
+        meta = self.trainer.load_checkpoint(CHECKPOINT_FILE)
+        if meta is not None:
+            self.n_games = int(meta.get('n_games', self.n_games))
+            self.record = int(meta.get('record', self.record))
+            self.total_score = int(meta.get('total_score', self.total_score))
+            return True
+
+        loaded_weights = self.model.load(MODEL_WEIGHTS_FILE)
+        return bool(loaded_weights)
+
+    def _save_progress(self):
+        meta = {
+            'n_games': self.n_games,
+            'record': self.record,
+            'total_score': self.total_score,
+        }
+        self.trainer.save_checkpoint(CHECKPOINT_FILE, meta=meta)
+        self.model.save(MODEL_WEIGHTS_FILE)
 
     def _is_collision(self, pt, snake, rows, cols):
         if pt['row'] < 0 or pt['row'] >= rows or pt['col'] < 0 or pt['col'] >= cols:
@@ -150,7 +174,8 @@ class Agent:
 
                 if score > self.record:
                     self.record = score
-                    self.model.save()
+
+                self._save_progress()
 
                 print('Game', self.n_games, 'Score', score, 'Record:', self.record)
 
@@ -158,7 +183,7 @@ class Agent:
                 self.total_score += score
                 mean_score = self.total_score / self.n_games
                 self.plot_mean_scores.append(mean_score)
-                plot(self.plot_scores, self.plot_mean_scores)
+                plot(self.plot_scores, self.plot_mean_scores, total_games=self.n_games)
 
                 await websocket.send(json.dumps({"reset": True}))
 
@@ -189,10 +214,22 @@ class Agent:
         self.plot_mean_scores = []
         self.total_score = 0
         self.record = 0
+
+        resumed = self._load_progress_if_available()
+        if resumed:
+            print(f"Resumed training from saved model/checkpoint (games={self.n_games}, record={self.record}).")
+        else:
+            print("No saved model found; starting fresh training.")
+
         try:
             asyncio.run(self._init_websocket())
         except KeyboardInterrupt:
             print("\nAgent stopped by user.")
+        finally:
+            try:
+                self._save_progress()
+            except Exception:
+                pass
 
     def remember(self, prev_state, prev_action, reward, state_new, is_game_over):
         self.memory.append((prev_state, prev_action, reward, state_new, is_game_over)) # popleft if MAX_MEMORY is reached
