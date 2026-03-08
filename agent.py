@@ -13,6 +13,8 @@ MAX_MEMORY = 100_000
 BATCH_SIZE = 1000
 LR = 0.001
 
+POSITIVE_EPSILON_GAMES_THRESHOLD = 100;
+
 MODEL_WEIGHTS_FILE = 'model.pth'
 CHECKPOINT_FILE = 'checkpoint.pth'
 
@@ -250,7 +252,7 @@ class Agent:
 
     def get_action(self, state):
         # random moves: tradeoff exploration / exploitation
-        self.epsilon = 100 - self.n_games
+        self.epsilon = POSITIVE_EPSILON_GAMES_THRESHOLD - self.n_games
         action = [0,0,0]
         if random.randint(0, 200) < self.epsilon:
             move = random.randint(0, 2)
