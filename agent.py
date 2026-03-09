@@ -4,7 +4,6 @@ import json
 import torch
 import random
 import numpy as np
-import os
 from collections import deque
 from helper import plot
 from model import Linear_QNet, QTrainer
@@ -13,7 +12,9 @@ MAX_MEMORY = 100_000
 BATCH_SIZE = 1000
 LR = 0.001
 
-POSITIVE_EPSILON_GAMES_THRESHOLD = 100;
+EPSILON_START = 1.0
+EPSILON_MIN = 0.001
+EPSILON_DECAY = 0.955
 
 MODEL_WEIGHTS_FILE = 'model.pth'
 CHECKPOINT_FILE = 'checkpoint.pth'
@@ -138,8 +139,6 @@ class Agent:
             
 
             current_direction = raw_state['direction']
-
-            # print(f"State updated: {state_new}")
             
             if self.prev_state is not None:
                 self.train_short_memory(
@@ -185,7 +184,8 @@ class Agent:
                 self.total_score += score
                 mean_score = self.total_score / self.n_games
                 self.plot_mean_scores.append(mean_score)
-                plot(self.plot_scores, self.plot_mean_scores, total_games=self.n_games)
+                self.plot_epsilons.append(self.epsilon)
+                plot(self.plot_scores, self.plot_mean_scores, epsilons=self.plot_epsilons, total_games=self.n_games)
 
                 await websocket.send(json.dumps({"reset": True}))
 
@@ -214,6 +214,7 @@ class Agent:
         self.prev_action = None
         self.plot_scores = []
         self.plot_mean_scores = []
+        self.plot_epsilons = []
         self.total_score = 0
         self.record = 0
 
@@ -252,9 +253,9 @@ class Agent:
 
     def get_action(self, state):
         # random moves: tradeoff exploration / exploitation
-        self.epsilon = POSITIVE_EPSILON_GAMES_THRESHOLD - self.n_games
+        self.epsilon = max(EPSILON_MIN, EPSILON_START * (EPSILON_DECAY ** self.n_games))
         action = [0,0,0]
-        if random.randint(0, 200) < self.epsilon:
+        if random.random() < self.epsilon:
             move = random.randint(0, 2)
             action[move] = 1
         else:

@@ -7,7 +7,7 @@ const MIN_UPDATE_INTERVAL = 5;
 const MAX_UPDATE_INTERVAL = 200;
 const UPDATE_INTERVAL_STEP = 5;
 
-let snake = [{ row: 10, col: 10 }];
+let snake = [{ row: 12, col: 16 }];
 let direction = { row: 0, col: 1 };
 let food = { row: 0, col: 0 };
 
