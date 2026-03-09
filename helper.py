@@ -1,12 +1,9 @@
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-from IPython import display
 
 plt.ion()
 
 def plot(scores, mean_scores, epsilons=None, total_games: int | None = None):
-    display.clear_output(wait=True)
-    display.display(plt.gcf())
     plt.clf()
     plt.title('Training...')
     plt.xlabel('Number of Games')
