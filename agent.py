@@ -23,15 +23,23 @@ CHECKPOINT_FILE = 'checkpoint.pth'
 class Agent:
 
     def _load_progress_if_available(self):
-        meta = self.trainer.load_checkpoint(CHECKPOINT_FILE)
+        try:
+            meta = self.trainer.load_checkpoint(CHECKPOINT_FILE)
+        except Exception:
+            print("Saved checkpoint is incompatible with current model architecture; starting fresh.")
+            return False
+
         if meta is not None:
             self.n_games = int(meta.get('n_games', self.n_games))
             self.record = int(meta.get('record', self.record))
             self.total_score = int(meta.get('total_score', self.total_score))
             return True
 
-        loaded_weights = self.model.load(MODEL_WEIGHTS_FILE)
-        return bool(loaded_weights)
+        try:
+            loaded_weights = self.model.load(MODEL_WEIGHTS_FILE)
+        except Exception:
+            print("Saved model weights are incompatible with current model architecture; starting fresh.")
+            return False
 
     def _save_progress(self):
         meta = {
