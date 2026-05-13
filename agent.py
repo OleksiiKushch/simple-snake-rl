@@ -4,6 +4,7 @@ import json
 import torch
 import random
 import numpy as np
+import os
 from collections import deque
 from helper import plot
 from model import Linear_QNet, QTrainer
@@ -14,7 +15,7 @@ LR = 0.001
 
 EPSILON_START = 1.0
 EPSILON_MIN = 0.001
-EPSILON_DECAY = 0.955
+EPSILON_DECAY = 0.975
 
 MODEL_WEIGHTS_FILE = 'model.pth'
 CHECKPOINT_FILE = 'checkpoint.pth'
@@ -55,6 +56,27 @@ class Agent:
 
     def _rotate_right(self, dir):
         return {'row': dir['col'], 'col': -dir['row']}
+
+    def _flood_fill(self, start, snake, rows, cols):
+        # treat all body segments except the tail as obstacles (tail vacates on move)
+        occupied = set((s['row'], s['col']) for s in snake[:-1])
+        if (start['row'] < 0 or start['row'] >= rows or
+                start['col'] < 0 or start['col'] >= cols or
+                (start['row'], start['col']) in occupied):
+            return 0
+        visited = set()
+        queue = deque([(start['row'], start['col'])])
+        visited.add((start['row'], start['col']))
+        while queue:
+            r, c = queue.popleft()
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nr, nc = r + dr, c + dc
+                if (0 <= nr < rows and 0 <= nc < cols
+                        and (nr, nc) not in occupied
+                        and (nr, nc) not in visited):
+                    visited.add((nr, nc))
+                    queue.append((nr, nc))
+        return len(visited)
 
 
     def _get_state(self, rows, cols, snake, direction, food):
@@ -98,7 +120,21 @@ class Agent:
             food['row'] > head['row'],  # food down
         ]
 
-        return np.array(state, dtype=int)
+        # flood fill: free area reachable after each possible action (normalised 0-1)
+        total_cells = rows * cols
+        dir_straight = direction
+        dir_right = self._rotate_right(direction)
+        dir_left = self._rotate_left(direction)
+        next_straight = {'row': head['row'] + dir_straight['row'], 'col': head['col'] + dir_straight['col']}
+        next_right    = {'row': head['row'] + dir_right['row'],    'col': head['col'] + dir_right['col']}
+        next_left     = {'row': head['row'] + dir_left['row'],     'col': head['col'] + dir_left['col']}
+        state += [
+            self._flood_fill(next_straight, snake, rows, cols) / total_cells,
+            self._flood_fill(next_right,    snake, rows, cols) / total_cells,
+            self._flood_fill(next_left,     snake, rows, cols) / total_cells,
+        ]
+
+        return np.array(state, dtype=float)
 
 
     def _convert_action_to_direction(self, action, current_direction):
@@ -139,6 +175,8 @@ class Agent:
             
 
             current_direction = raw_state['direction']
+
+            # print(f"State updated: {state_new}")
             
             if self.prev_state is not None:
                 self.train_short_memory(
@@ -208,7 +246,7 @@ class Agent:
         self.epsilon = 0 # randomness
         self.gamma = 0.9 # discount rate
         self.memory = deque(maxlen=MAX_MEMORY) # popleft()
-        self.model = Linear_QNet(11, 256, 3)
+        self.model = Linear_QNet(14, 256, 3)
         self.trainer = QTrainer(self.model, lr=LR, gamma=self.gamma)
         self.prev_state = None
         self.prev_action = None
@@ -255,7 +293,7 @@ class Agent:
         # random moves: tradeoff exploration / exploitation
         self.epsilon = max(EPSILON_MIN, EPSILON_START * (EPSILON_DECAY ** self.n_games))
         action = [0,0,0]
-        if random.random() < self.epsilon:
+        if random.random() < (self.epsilon - 1):
             move = random.randint(0, 2)
             action[move] = 1
         else:
