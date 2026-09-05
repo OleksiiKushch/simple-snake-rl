@@ -191,11 +191,11 @@ document.addEventListener('keydown', (event) => {
     if (event.key === 'ArrowLeft' && direction.col !== 1) direction = { row: 0, col: -1 };
     if (event.key === 'ArrowRight' && direction.col !== -1) direction = { row: 0, col: 1 };
 
-    if (event.code === 'NumpadSubtract') {
+    if (event.code === 'NumpadSubtract' || event.key === '-') {
         queueSpeedChange(UPDATE_INTERVAL_STEP);
     }
 
-    if (event.code === 'NumpadAdd') {
+    if (event.code === 'NumpadAdd' || event.key === '=' || event.key === '+') {
         queueSpeedChange(-UPDATE_INTERVAL_STEP);
     }
 });
