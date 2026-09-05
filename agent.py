@@ -301,7 +301,7 @@ class Agent:
         # random moves: tradeoff exploration / exploitation
         self.epsilon = max(EPSILON_MIN, EPSILON_START * (EPSILON_DECAY ** self.n_games))
         action = [0,0,0]
-        if random.random() < (self.epsilon - 1):
+        if random.random() < (self.epsilon):
             move = random.randint(0, 2)
             action[move] = 1
         else:
