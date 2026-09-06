@@ -21,6 +21,22 @@ EPSILON_DECAY = 0.975
 
 MODEL_WEIGHTS_FILE = 'model.pth'
 CHECKPOINT_FILE = 'checkpoint.pth'
+CONFIG_FILE = 'config.json'
+
+
+def _load_config_file(path):
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            print(f"Warning: {path} must be a JSON object; ignoring.")
+            return {}
+        return data
+    except Exception as e:
+        print(f"Warning: could not read {path}: {e}")
+        return {}
 
 class Agent:
 
@@ -276,13 +292,20 @@ class Agent:
             print("Server stopped gracefully.")
 
 
-    def __init__(self, headless=False, speed=10.0, enable_plot=True):
+    def __init__(self, headless=False, speed=10.0, enable_plot=True, explore=True,
+                 max_memory=MAX_MEMORY, batch_size=BATCH_SIZE, lr=LR,
+                 eps_start=EPSILON_START, eps_min=EPSILON_MIN, eps_decay=EPSILON_DECAY):
         self.n_games = 0
         self.epsilon = 0 # randomness
         self.gamma = 0.9 # discount rate
-        self.memory = deque(maxlen=MAX_MEMORY) # popleft()
+        self.explore = explore
+        self.eps_start = eps_start
+        self.eps_min = eps_min
+        self.eps_decay = eps_decay
+        self.batch_size = batch_size
+        self.memory = deque(maxlen=max_memory) # popleft()
         self.model = Linear_QNet(14, 256, 3)
-        self.trainer = QTrainer(self.model, lr=LR, gamma=self.gamma)
+        self.trainer = QTrainer(self.model, lr=lr, gamma=self.gamma)
         self.prev_state = None
         self.prev_action = None
         self.plot_scores = []
@@ -315,8 +338,8 @@ class Agent:
         self.memory.append((prev_state, prev_action, reward, state_new, is_game_over)) # popleft if MAX_MEMORY is reached
 
     def train_long_memory(self):
-        if len(self.memory) > BATCH_SIZE:
-            mini_sample = random.sample(self.memory, BATCH_SIZE) # list of tuples
+        if len(self.memory) > self.batch_size:
+            mini_sample = random.sample(self.memory, self.batch_size) # list of tuples
         else:
             mini_sample = self.memory
 
@@ -330,9 +353,12 @@ class Agent:
 
     def get_action(self, state):
         # random moves: tradeoff exploration / exploitation
-        self.epsilon = max(EPSILON_MIN, EPSILON_START * (EPSILON_DECAY ** self.n_games))
+        if self.explore:
+            self.epsilon = max(self.eps_min, self.eps_start * (self.eps_decay ** self.n_games))
+        else:
+            self.epsilon = 0.0
         action = [0,0,0]
-        if random.random() < (self.epsilon):
+        if random.random() < self.epsilon:
             move = random.randint(0, 2)
             action[move] = 1
         else:
@@ -346,17 +372,73 @@ class Agent:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Snake RL agent")
+    parser.add_argument('--config', default=CONFIG_FILE,
+                        help=f'path to JSON config file (default: {CONFIG_FILE})')
     parser.add_argument('--headless', action='store_true',
                         help='train against the built-in headless game emulation '
                              '(no browser/websocket needed)')
-    parser.add_argument('--speed', type=float, default=10.0,
+    parser.add_argument('--speed', type=float,
                         help='game speed in moves per second for headless mode '
                              '(default: 10.0, same as the browser default)')
     parser.add_argument('--no-plot', action='store_true',
                         help='disable the matplotlib training plot')
+    parser.add_argument('--no-explore', action='store_true',
+                        help='disable random exploration (always use the model)')
+    parser.add_argument('--eps-start', type=float,
+                        help='initial exploration rate (0-1)')
+    parser.add_argument('--eps-min', type=float,
+                        help='minimum exploration rate (0-1)')
+    parser.add_argument('--eps-decay', type=float,
+                        help='exploration decay factor per game (0-1)')
+    parser.add_argument('--lr', type=float,
+                        help='learning rate')
+    parser.add_argument('--batch-size', type=int,
+                        help='replay batch size')
+    parser.add_argument('--memory', type=int,
+                        help='replay buffer size')
     args = parser.parse_args()
 
-    if args.speed <= 0:
+    config = _load_config_file(args.config)
+
+    def pick(name, cli_value, default):
+        return cli_value if cli_value is not None else config.get(name, default)
+
+    speed = pick('speed', args.speed, 10.0)
+    if speed <= 0:
         parser.error('--speed must be > 0')
 
-    Agent(headless=args.headless, speed=args.speed, enable_plot=not args.no_plot)
+    lr = pick('lr', args.lr, LR)
+    if lr <= 0:
+        parser.error('--lr must be > 0')
+
+    batch_size = pick('batch_size', args.batch_size, BATCH_SIZE)
+    if batch_size <= 0:
+        parser.error('--batch-size must be > 0')
+
+    max_memory = pick('max_memory', args.memory, MAX_MEMORY)
+    if max_memory <= 0:
+        parser.error('--memory must be > 0')
+
+    eps_start = pick('eps_start', args.eps_start, EPSILON_START)
+    eps_min = pick('eps_min', args.eps_min, EPSILON_MIN)
+    eps_decay = pick('eps_decay', args.eps_decay, EPSILON_DECAY)
+    for name, value in (('--eps-start', eps_start), ('--eps-min', eps_min), ('--eps-decay', eps_decay)):
+        if not 0 <= value <= 1:
+            parser.error(f'{name} must be between 0 and 1')
+
+    headless = args.headless or bool(config.get('headless', False))
+    enable_plot = not args.no_plot and bool(config.get('plot', True))
+    explore = not args.no_explore and bool(config.get('explore', True))
+
+    Agent(
+        headless=headless,
+        speed=speed,
+        enable_plot=enable_plot,
+        explore=explore,
+        max_memory=max_memory,
+        batch_size=batch_size,
+        lr=lr,
+        eps_start=eps_start,
+        eps_min=eps_min,
+        eps_decay=eps_decay,
+    )

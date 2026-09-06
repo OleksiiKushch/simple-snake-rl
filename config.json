@@ -1,0 +1,12 @@
+{
+    "headless": false,
+    "speed": 10.0,
+    "plot": true,
+    "explore": true,
+    "eps_start": 1.0,
+    "eps_min": 0.001,
+    "eps_decay": 0.975,
+    "lr": 0.001,
+    "max_memory": 100000,
+    "batch_size": 1000
+}
