@@ -1,4 +1,5 @@
 import asyncio
+import argparse
 import websockets
 import json
 import torch
@@ -8,6 +9,7 @@ import os
 from collections import deque
 from helper import plot
 from model import Linear_QNet, QTrainer
+from emulator import SnakeEmulator
 
 MAX_MEMORY = 100_000
 BATCH_SIZE = 1000
@@ -170,70 +172,95 @@ class Agent:
     async def _handler(self, websocket):
         async for message in websocket:
             raw_state = json.loads(message)
-            state_new  = self._get_state(
-                raw_state['rows'],
-                raw_state['columns'],
-                raw_state['snake'],
-                raw_state['direction'],
-                raw_state['food'],
-            )
-            reward = raw_state.get('reward', 0)
-            is_game_over = raw_state.get('isGameOver', False)
-            score = raw_state.get('score', 0)
-            
-
-            current_direction = raw_state['direction']
-
-            # print(f"State updated: {state_new}")
-            
-            if self.prev_state is not None:
-                self.train_short_memory(
-                    self.prev_state,
-                    self.prev_action,
-                    reward,
-                    state_new,
-                    is_game_over
-                )
-
-                self.remember(
-                    self.prev_state,
-                    self.prev_action,
-                    reward,
-                    state_new,
-                    is_game_over
-                )
-        
-            action = self.get_action(state_new)
-
-            new_direction = self._convert_action_to_direction(action, current_direction)
-
+            _, new_direction = self._process_state(raw_state)
             await websocket.send(json.dumps({"direction": new_direction}))
-
-            self.prev_state = state_new
-            self.prev_action = action
-
-            if is_game_over:
-                self.n_games += 1
-                self.train_long_memory()
-
-                self.prev_state = None
-                self.prev_action = None
-
-                if score > self.record:
-                    self.record = score
-
-                self._save_progress()
-
-                print('Game', self.n_games, 'Score', score, 'Record:', self.record)
-
-                self.plot_scores.append(score)
-                self.total_score += score
-                mean_score = self.total_score / self.n_games
-                self.plot_mean_scores.append(mean_score)
-                self.plot_epsilons.append(self.epsilon)
-                plot(self.plot_scores, self.plot_mean_scores, epsilons=self.plot_epsilons, total_games=self.n_games)
-
+            if raw_state.get('isGameOver', False):
                 await websocket.send(json.dumps({"reset": True}))
+
+
+    def _process_state(self, raw_state):
+        """Shared per-step logic for websocket and headless modes.
+        Returns (action, new_direction)."""
+        state_new = self._get_state(
+            raw_state['rows'],
+            raw_state['columns'],
+            raw_state['snake'],
+            raw_state['direction'],
+            raw_state['food'],
+        )
+        reward = raw_state.get('reward', 0)
+        is_game_over = raw_state.get('isGameOver', False)
+        score = raw_state.get('score', 0)
+
+        current_direction = raw_state['direction']
+
+        # print(f"State updated: {state_new}")
+
+        if self.prev_state is not None:
+            self.train_short_memory(
+                self.prev_state,
+                self.prev_action,
+                reward,
+                state_new,
+                is_game_over
+            )
+
+            self.remember(
+                self.prev_state,
+                self.prev_action,
+                reward,
+                state_new,
+                is_game_over
+            )
+
+        action = self.get_action(state_new)
+
+        new_direction = self._convert_action_to_direction(action, current_direction)
+
+        self.prev_state = state_new
+        self.prev_action = action
+
+        if is_game_over:
+            self._on_game_over(score)
+
+        return action, new_direction
+
+    def _on_game_over(self, score):
+        self.n_games += 1
+        self.train_long_memory()
+
+        self.prev_state = None
+        self.prev_action = None
+
+        if score > self.record:
+            self.record = score
+
+        self._save_progress()
+
+        print('Game', self.n_games, 'Score', score, 'Record:', self.record)
+
+        self.plot_scores.append(score)
+        self.total_score += score
+        mean_score = self.total_score / self.n_games
+        self.plot_mean_scores.append(mean_score)
+        self.plot_epsilons.append(self.epsilon)
+        if self.enable_plot:
+            plot(self.plot_scores, self.plot_mean_scores, epsilons=self.plot_epsilons, total_games=self.n_games)
+
+
+    async def _run_emulation(self, speed):
+        emulator = SnakeEmulator()
+        step_delay = 1.0 / speed
+        print(f"Headless mode: training against in-process game emulation ({speed} moves/sec).")
+        print("Press Ctrl+C to stop.")
+        while True:
+            _, new_direction = self._process_state(emulator.get_state())
+            emulator.direction = new_direction
+            if emulator.is_game_over:
+                emulator.reset()
+            else:
+                emulator.move()
+            await asyncio.sleep(step_delay)
 
 
     async def _init_websocket(self):
@@ -249,7 +276,7 @@ class Agent:
             print("Server stopped gracefully.")
 
 
-    def __init__(self):
+    def __init__(self, headless=False, speed=10.0, enable_plot=True):
         self.n_games = 0
         self.epsilon = 0 # randomness
         self.gamma = 0.9 # discount rate
@@ -263,6 +290,7 @@ class Agent:
         self.plot_epsilons = []
         self.total_score = 0
         self.record = 0
+        self.enable_plot = enable_plot
 
         resumed = self._load_progress_if_available()
         if resumed:
@@ -271,7 +299,10 @@ class Agent:
             print("No saved model found; starting fresh training.")
 
         try:
-            asyncio.run(self._init_websocket())
+            if headless:
+                asyncio.run(self._run_emulation(speed))
+            else:
+                asyncio.run(self._init_websocket())
         except KeyboardInterrupt:
             print("\nAgent stopped by user.")
         finally:
@@ -314,4 +345,18 @@ class Agent:
 
 
 if __name__ == "__main__":
-    Agent()
+    parser = argparse.ArgumentParser(description="Snake RL agent")
+    parser.add_argument('--headless', action='store_true',
+                        help='train against the built-in headless game emulation '
+                             '(no browser/websocket needed)')
+    parser.add_argument('--speed', type=float, default=10.0,
+                        help='game speed in moves per second for headless mode '
+                             '(default: 10.0, same as the browser default)')
+    parser.add_argument('--no-plot', action='store_true',
+                        help='disable the matplotlib training plot')
+    args = parser.parse_args()
+
+    if args.speed <= 0:
+        parser.error('--speed must be > 0')
+
+    Agent(headless=args.headless, speed=args.speed, enable_plot=not args.no_plot)
